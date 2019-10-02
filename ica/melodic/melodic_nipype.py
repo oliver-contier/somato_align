@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
-# SBATCH --job-name=subject_melodic
-# SBATCH --output=logs/multiprocess_%j.out
-# SBATCH --time=08:00:00
-# SBATCH --nodes=1
-# SBATCH --exclusive
+#SBATCH --job-name=subject_melodic
+#SBATCH --output=logs/multiprocess_%j.out
+#SBATCH --time=08:00:00
+#SBATCH --nodes=2
+#SBATCH --exclusive
+#SBATCH --ntasks=4
 
 from os.path import join as pjoin
 
@@ -107,13 +108,14 @@ def create_melodic_wf(wf_basedir='/home/homeGlobal/oli/somato/scratch/ica/MELODI
         wf.connect(reshapeflist, 'masklist_picked', melodic, 'mask')
     else:
         wf.connect(susan, 'smoothed_file', melodic, 'in_files')
+        wf.connect(bet, 'mask_file', melodic, 'mask')
 
     wf.base_dir = workdir
     return wf
 
 
 if __name__ == '__main__':
-    workflow = create_melodic_wf()
+    workflow = create_melodic_wf(ana_lvl='run')
     workflow.run()
 
-    workflow.run(plugin='MultiProc', plugin_args={'n_procs': 2})
+    workflow.run(plugin='MultiProc', plugin_args={'n_procs': 4})

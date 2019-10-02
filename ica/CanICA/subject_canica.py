@@ -6,6 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --exclusive
 
+
 """
 Run Nilearn's CanICA on subject/condition level and parallelize through slurm for all data.
 
