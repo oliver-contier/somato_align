@@ -1,3 +1,4 @@
 *.pklz
 *.png
 *.ipynb_checkpoints*
+*.mpi4py_notes.py
