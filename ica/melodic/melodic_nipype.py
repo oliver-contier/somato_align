@@ -10,15 +10,17 @@
 from os.path import join as pjoin
 
 from nipype.interfaces.fsl import MELODIC, BET, SUSAN
+from nipype.interfaces.fsl.maths import TemporalFilter
 from nipype.interfaces.utility import Function
 from nipype.pipeline.engine import Workflow, Node, MapNode
 
 
-def grab_somato_data(ds_dir='/data/BnB_USER/oliver/somato',
+def grab_somato_data(ds_dir='/home/homeGlobal/oli/somato/scratch/dataset',
                      condition_names=('D1_D5', 'D5_D1'),
                      testing=True):
     """
     Grab functional data and attached metainfo (subject and run).
+    if testing is True, only first two subjects' data will be grabbed.
     """
     import glob
     import os
@@ -55,21 +57,32 @@ def reshape_flist(boldlist_flat, masklist_flat, nconds=2):
 def create_melodic_wf(wf_basedir='/home/homeGlobal/oli/somato/scratch/ica/MELODIC/melodic_wf_workdir',
                       ana_lvl='subject',
                       tr=2.,
+                      test_subs=False,
                       out_report=True,
                       bet_fracthr=.2,
                       susan_fwhm=2.,
                       susan_brightthresh=1000,
+                      hp_vols=25.,
+                      lp_vols=4.,
                       melodic_bgthresh=10.):
+    """
     # TODO: docstring
+
+    Sensible band pass filters suggested by Michael (in volumes):
+    - stronger: 4 vols low-pass, 25 vol high-pass
+    - weaker: 2 vol los-pass, 30 vol high-pass
+    """
+
     wf = Workflow(name='somato_melodic_wf')
     assert ana_lvl in ['run', 'subject']
     melodic, workdir = None, None
 
     # datagrabber node
-    datagrabber = Node(Function(input_names=[],
+    datagrabber = Node(Function(input_names=['testing'],
                                 output_names=['bold_files', 'subject_ids', 'condition_names'],
                                 function=grab_somato_data),
                        name='datagrabber')
+    datagrabber.inputs.testing = test_subs
 
     # BET node
     bet = MapNode(BET(frac=bet_fracthr, functional=True, mask=True),
@@ -78,6 +91,10 @@ def create_melodic_wf(wf_basedir='/home/homeGlobal/oli/somato/scratch/ica/MELODI
     # SUSAN smoothing node
     susan = MapNode(SUSAN(fwhm=susan_fwhm, brightness_threshold=susan_brightthresh),
                     iterfield=['in_file'], name='susan')
+
+    bpf = MapNode(TemporalFilter(highpass_sigma=hp_vols / 2.3548,
+                                 lowpass_sigma=lp_vols / 2.3548),
+                  iterfield=['in_file'], name='bpf')
 
     reshapeflist = Node(Function(input_names=['boldlist_flat', 'masklist_flat'],
                                  output_names=['boldlist_nested', 'masklist_picked'],
@@ -101,13 +118,14 @@ def create_melodic_wf(wf_basedir='/home/homeGlobal/oli/somato/scratch/ica/MELODI
 
     wf.connect(datagrabber, 'bold_files', bet, 'in_file')
     wf.connect(bet, 'out_file', susan, 'in_file')
+    wf.connect(susan, 'smoothed_file', bpf, 'in_file')
     if ana_lvl == 'subject':
-        wf.connect(susan, 'smoothed_file', reshapeflist, 'boldlist_flat')
+        wf.connect(bpf, 'out_file', reshapeflist, 'boldlist_flat')
         wf.connect(bet, 'mask_file', reshapeflist, 'masklist_flat')
         wf.connect(reshapeflist, 'boldlist_nested', melodic, 'in_files')
         wf.connect(reshapeflist, 'masklist_picked', melodic, 'mask')
     else:
-        wf.connect(susan, 'smoothed_file', melodic, 'in_files')
+        wf.connect(bpf, 'out_file', melodic, 'in_files')
         wf.connect(bet, 'mask_file', melodic, 'mask')
 
     wf.base_dir = workdir
@@ -115,7 +133,7 @@ def create_melodic_wf(wf_basedir='/home/homeGlobal/oli/somato/scratch/ica/MELODI
 
 
 if __name__ == '__main__':
-    workflow = create_melodic_wf(ana_lvl='run')
+    workflow = create_melodic_wf(ana_lvl='subject', test_subs=False)
     workflow.run()
 
     workflow.run(plugin='MultiProc', plugin_args={'n_procs': 4})

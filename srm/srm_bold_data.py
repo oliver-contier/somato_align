@@ -22,7 +22,9 @@ from scipy import stats
 
 def grab_bold_data(cond_id='D1_D5',
                    ds_dir='/data/BnB_USER/oliver/somato',
-                   testsubs=False):
+                   testsubs=False,
+                   use_filtered_from_workdir='/home/homeGlobal/oli/somato/scratch/ica/MELODIC/melodic_wf_workdir/'
+                                             'subject_lvl/somato_melodic_wf/'):
     """
     Get file paths for our bold data for a given run.
     """
@@ -31,8 +33,13 @@ def grab_bold_data(cond_id='D1_D5',
                for subdir in glob.glob(ds_dir + '/*')]
     if testsubs:
         sub_ids = sub_ids[:testsubs]
-    boldfiles = [pjoin(ds_dir, sub_id, cond_id, 'data.nii.gz')
-                 for sub_id in sub_ids]
+
+    if use_filtered_from_workdir:
+        boldfiles = [pjoin(use_filtered_from_workdir, 'bpf', 'mapflow', '_bpf%i' % idx, 'data_brain_smooth_filt.nii.gz')
+                     for idx in range(0, len(sub_ids)*2, 2)]
+    else:
+        boldfiles = [pjoin(ds_dir, sub_id, cond_id, 'data.nii.gz')
+                     for sub_id in sub_ids]
     return boldfiles, sub_ids
 
 
@@ -90,5 +97,6 @@ def train_srm(training_data,
 if __name__ == '__main__':
     bold_files, subids = grab_bold_data()  # testsubs=3)
     bold_arrays = boldfiles_to_arrays(bold_files)
-    srm_ = train_srm(bold_arrays)  # , n_comps=5, n_iters=5)
+    srm_ = train_srm(bold_arrays, use_robust_srm=False,
+                     pickle_outdir='/home/homeGlobal/oli/somato/scratch/srm_filtered')  # , n_comps=5, n_iters=5)
     print('done')
