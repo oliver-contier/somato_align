@@ -15,7 +15,7 @@ from nipype.interfaces.utility import Function
 from nipype.pipeline.engine import Workflow, Node, MapNode
 
 
-def grab_somato_data(ds_dir='/home/homeGlobal/oli/somato/scratch/dataset',
+def grab_somato_data(ds_dir='/home/BnB_User/oliver/somato/scratch/dataset',
                      condition_names=('D1_D5', 'D5_D1'),
                      testing=True):
     """
