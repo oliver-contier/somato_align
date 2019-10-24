@@ -3,13 +3,14 @@
 """
 
 """
-
+import os
 from nipype.algorithms.modelgen import SpecifyModel
 from nipype.interfaces.fsl import BET, SUSAN
 from nipype.interfaces.fsl.maths import TemporalFilter
 from nipype.interfaces.utility import Function
 from nipype.pipeline.engine import Workflow, Node, MapNode
 from nipype.workflows.fmri.fsl import create_modelfit_workflow
+from nipype.interfaces.io import DataSink
 
 
 def grab_bold_data(cond_id='D1_D5',
@@ -32,7 +33,17 @@ def grab_bold_data(cond_id='D1_D5',
 
 def make_bunch_and_contrasts(n_cycles=20,
                              dur_per_digit=5.12,
-                             n_subs=12):
+                             n_subs=12,
+                             subtractive_contrast=True):
+    """
+    Produce subject_info as required input of SpecifyModel (Bunch containing conditions, onsets, durations)
+    and contrasts as input for modelfit workflow.
+
+    Subtractive contrasts weights regressors of interest with +4 and all others with -1. in this case, we skip the last
+    contrast (because it would be a linear combination of the others).
+    Non-subtractive contrast (i.e. one-sample t-test) weights regressor of interest with 1 and all others with 0.
+    """
+
     from nipype.interfaces.base import Bunch
     cycle_dur = dur_per_digit * 5
     conditions = ['D_%i' % i for i in range(1, 6)]
@@ -45,9 +56,17 @@ def make_bunch_and_contrasts(n_cycles=20,
     # t-cotrasts
     t_contrasts = []
     for cond in conditions:
-        contrast_vector = [0, 0, 0, 0]
-        contrast_vector.insert(conditions.index(cond), 1)
-        t_contrasts.append(('tcon_%s' % cond, 'T', conditions, contrast_vector))
+        if subtractive_contrast:
+            if conditions.index(cond) == len(cond)-1:
+                continue
+            else:
+                contrast_vector = [-1, -1, -1, -1]
+                contrast_vector.insert(conditions.index(cond), 4)
+                t_contrasts.append(('tcon_%s' % cond, 'T', conditions, contrast_vector))
+        else:
+            contrast_vector = [0, 0, 0, 0]
+            contrast_vector.insert(conditions.index(cond), 1)
+            t_contrasts.append(('tcon_%s' % cond, 'T', conditions, contrast_vector))
     # f-contrast over all t-contrasts
     f_contrast = [('All_Digits', 'F', t_contrasts)]
     contrasts = t_contrasts + f_contrast
@@ -64,6 +83,7 @@ def flatten_nested_list(nested_list):
 
 
 def create_main_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm',
+                   wf_datasink_dir='/data/BnB_USER/oliver/somato/scratch/roi_glm_results',
                    dsdir='/data/BnB_USER/oliver/somato/data',
                    condid='D1_D5',
                    test_subs=False,
@@ -73,14 +93,23 @@ def create_main_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm',
                    susan_brightthresh=1000,
                    hp_vols=30.,
                    lp_vols=2.,
-                   film_thresh=1000.,  # TODO: what's a good film threshold? model autocorrelations? include derivative?
+                   film_thresh=0.01,
                    film_model_autocorr=False,
-                   use_derivs=False):
+                   use_derivs=True,
+                   tcon_subtractive=True):
     """
     Generate analysis pipeline for pre-srm GLM (and possibly later append with real srm)
+
+    # TODO: what's a good film threshold? model autocorrelations?
+    - filmgls threshold: nipype default is 1000
     """
 
-    wf = Workflow(name='somato_melodic_wf')
+    # make work and res dir if necessary
+    for target_dir in [wf_datasink_dir, wf_workdir]:
+        if not os.path.exists(target_dir):
+            os.makedirs(target_dir)
+
+    wf = Workflow(name='somato_melodic_wf')  # TODO: rename
     wf.base_dir = wf_workdir
 
     # datagrabber node
@@ -106,10 +135,11 @@ def create_main_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm',
                   iterfield=['in_file'], name='bpf')
 
     # produce conditions, onsets, durations (same for all subjects)
-    designgen = Node(Function(input_names=[],
+    designgen = Node(Function(input_names=['subtracctive_contrast'],
                               output_names=['subject_info', 'contrasts'],
                               function=make_bunch_and_contrasts),
                      name='designgen')
+    designgen.inputs.subtractive_contrast = tcon_subtractive
 
     # creates (intermediate) fsl compatible design file 'session_info' for modelfit
     modelspec = MapNode(SpecifyModel(input_units='secs'), name='modelspec',
@@ -130,6 +160,9 @@ def create_main_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm',
     modelfit.inputs.inputspec.model_serial_correlations = film_model_autocorr
     modelfit.inputs.inputspec.bases = {'dgamma': {'derivs': use_derivs}}
 
+    # Datasink
+    datasink = Node(interface=DataSink(), name="datasink")
+
     # connect nodes / workflows
     wf.connect(datagrabber, 'boldfiles', bet, 'in_file')
     wf.connect(bet, 'out_file', susan, 'in_file')
@@ -142,10 +175,12 @@ def create_main_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm',
     wf.connect(designgen, 'contrasts', modelfit, 'inputspec.contrasts')
     wf.connect(bpf, 'out_file', modelfit, 'inputspec.functional_data')
 
+    wf.connect(modelfit, 'modelestimate.zfstats', datasink, 'zfstats')
+
     return wf
 
 
 if __name__ == '__main__':
     workflow = create_main_wf(test_subs=False)
-    # workflow.run(plugin='MultiProc', plugin_args={'n_procs': 4})
-    workflow.run()
+    workflow.run(plugin='MultiProc', plugin_args={'n_procs': 8})
+    # workflow.run()
