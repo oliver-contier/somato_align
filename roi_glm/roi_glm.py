@@ -14,7 +14,7 @@ from nipype.interfaces.io import DataSink
 
 
 def grab_bold_data(cond_id='D1_D5',
-                   ds_dir='/data/BnB_USER/oliver/somato/data',
+                   ds_dir='/data/BnB_USER/oliver/somato/scratch/dataset',
                    testsubs=False):
     """
     Get file paths for our bold data for a given run.
@@ -22,6 +22,7 @@ def grab_bold_data(cond_id='D1_D5',
     import os
     import glob
     from os.path import join as pjoin
+    assert os.path.exists(ds_dir)
     sub_ids = [os.path.basename(subdir)
                for subdir in glob.glob(ds_dir + '/*')]
     if testsubs:
@@ -34,7 +35,7 @@ def grab_bold_data(cond_id='D1_D5',
 def make_bunch_and_contrasts(n_cycles=20,
                              dur_per_digit=5.12,
                              n_subs=12,
-                             subtractive_contrast=True):
+                             subtractive_contrast=False):
     """
     Produce subject_info as required input of SpecifyModel (Bunch containing conditions, onsets, durations)
     and contrasts as input for modelfit workflow.
@@ -84,32 +85,33 @@ def flatten_nested_list(nested_list):
 
 def create_main_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm',
                    wf_datasink_dir='/data/BnB_USER/oliver/somato/scratch/roi_glm_results',
-                   dsdir='/data/BnB_USER/oliver/somato/data',
+                   dsdir='/data/BnB_USER/oliver/somato/scratch/dataset',
                    condid='D1_D5',
                    test_subs=False,
                    tr=2.,
                    bet_fracthr=.2,
-                   susan_fwhm=2,
+                   spatial_fwhm=2,
                    susan_brightthresh=1000,
                    hp_vols=30.,
                    lp_vols=2.,
-                   film_thresh=0.01,
-                   film_model_autocorr=False,
+                   film_thresh=.001,
+                   film_model_autocorr=True,
                    use_derivs=True,
-                   tcon_subtractive=True):
+                   tcon_subtractive=False):
     """
     Generate analysis pipeline for pre-srm GLM (and possibly later append with real srm)
 
-    # TODO: what's a good film threshold? model autocorrelations?
-    - filmgls threshold: nipype default is 1000
+    # TODO: what's a good film threshold?
+    filmgls threshold: nipype default is 1000. However, since this is applied on already heavily filtered data here,
+    everything above 0.01 cuts away lots of grey matter voxels.
     """
 
     # make work and res dir if necessary
-    for target_dir in [wf_datasink_dir, wf_workdir]:
+    for target_dir in [wf_workdir, wf_datasink_dir]:
         if not os.path.exists(target_dir):
             os.makedirs(target_dir)
 
-    wf = Workflow(name='somato_melodic_wf')  # TODO: rename
+    wf = Workflow(name='somato_roi_glm_wf')  # TODO: rename
     wf.base_dir = wf_workdir
 
     # datagrabber node
@@ -126,7 +128,7 @@ def create_main_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm',
                   iterfield=['in_file'], name='bet')
 
     # SUSAN smoothing node
-    susan = MapNode(SUSAN(fwhm=susan_fwhm, brightness_threshold=susan_brightthresh),
+    susan = MapNode(SUSAN(fwhm=spatial_fwhm, brightness_threshold=susan_brightthresh),
                     iterfield=['in_file'], name='susan')
 
     # bandpass filter node
@@ -160,8 +162,12 @@ def create_main_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm',
     modelfit.inputs.inputspec.model_serial_correlations = film_model_autocorr
     modelfit.inputs.inputspec.bases = {'dgamma': {'derivs': use_derivs}}
 
+    # TODO: For SRM: node to select above threshold voxels as numpy arrays,
+    #  while remembering the voxel indices to be able to reconvert back to original space later on.
+
     # Datasink
     datasink = Node(interface=DataSink(), name="datasink")
+    datasink.inputs.base_directory = wf_datasink_dir
 
     # connect nodes / workflows
     wf.connect(datagrabber, 'boldfiles', bet, 'in_file')
@@ -175,12 +181,17 @@ def create_main_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm',
     wf.connect(designgen, 'contrasts', modelfit, 'inputspec.contrasts')
     wf.connect(bpf, 'out_file', modelfit, 'inputspec.functional_data')
 
-    wf.connect(modelfit, 'modelestimate.zfstats', datasink, 'zfstats')
+    # connect to datasink
+    wf.connect(modelfit.get_node('modelgen'), 'design_image', datasink, 'design_image')
+    wf.connect(modelfit.get_node('modelestimate'), 'zfstats', datasink, 'zfstats')
+    wf.connect(modelfit.get_node('modelestimate'), 'thresholdac', datasink, 'thresholdac')
+    wf.connect(modelfit, 'outputspec.zfiles', datasink, 'zfiles')
+    wf.connect(modelfit, 'outputspec.pfiles', datasink, 'pfiles')
 
     return wf
 
 
 if __name__ == '__main__':
-    workflow = create_main_wf(test_subs=False)
+    workflow = create_main_wf()
     workflow.run(plugin='MultiProc', plugin_args={'n_procs': 8})
     # workflow.run()
