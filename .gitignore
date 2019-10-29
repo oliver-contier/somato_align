@@ -1,5 +1,8 @@
+*.dot
 *.pklz
 *.png
 *.ipynb_checkpoints*
 *mpi4py_notes.py
 *.nii.gz
+._README.md
+*__pycache__
