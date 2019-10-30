@@ -67,6 +67,9 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
     bet = MapNode(BET(frac=bet_fracthr, functional=True, mask=True),
                   iterfield=['in_file'], name='bet')
 
+    pick_mask = Node(Function(function=custom_node_functions.pick_first_mask,
+                              input_names=['mask_files'], output_names=['first_mask']), name='pick_mask')
+
     # SUSAN smoothing node
     susan = MapNode(SUSAN(fwhm=spatial_fwhm, brightness_threshold=susan_brightthresh),
                     iterfield=['in_file'], name='susan')
@@ -155,11 +158,13 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
     sub_wf.connect(cope_sorter, 'varcopes', fixedfx, 'inputspec.varcopes')
     sub_wf.connect(modelfit, 'outputspec.dof_file', fixedfx, 'inputspec.dof_files')
     sub_wf.connect(cope_sorter, 'n_runs', fixedfx.get_node('l2model'), 'num_copes')
-    sub_wf.connect(bet, 'mask_file', fixedfx.get_node('flameo'), 'mask_file')
+    sub_wf.connect(bet, 'mask_file', pick_mask, 'mask_files')
+    sub_wf.connect(pick_mask, 'first_mask', fixedfx.get_node('flameo'), 'mask_file')
 
     sub_wf.write_graph(graph2use='colored', dotfilename='./sub_graph_colored.dot')
-    sub_wf.run(plugin='MultiProc', plugin_args={'n_procs': 8})
-    # sub_wf.run()
+    # sub_wf.run(plugin='MultiProc', plugin_args={'n_procs': 2})
+    # sub_wf.run(plugin='SLURM')
+    sub_wf.run()
     return sub_wf
 
 
@@ -210,14 +215,14 @@ def create_group_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/wor
     subj_grabber.inputs.ds_dir = dsdir
     subj_grabber.inputs.testsubs = test_subs
 
-    # map node performing subject-specific analysis pipeline
+    # map node performing subject-specific analysis pipelinde
     sub_ffx = MapNode(
         Function(function=create_subject_ffx_wf,
                  inputs=['sub_id', 'bet_fracthr', 'spatial_fwhm', 'susan_brightthresh', 'hp_vols', 'lp_vols',
                          'remove_hemi', 'film_thresh', 'film_model_autocorr', 'use_derivs', 'tr', 'tcon_subtractive',
                          'cond_ids', 'dsdir', 'meta_wf_workdir'],
                  outputs=['sub_wf']),
-        iterfield=['sub_id'],  # imports = passing_imports
+        iterfield=['sub_id'],
         name='subject_ffx_mapnode')
     sub_ffx.inputs.bet_fracthr = bet_fracthr
     sub_ffx.inputs.spatial_fwhm = spatial_fwhm
@@ -242,5 +247,6 @@ def create_group_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/wor
 if __name__ == '__main__':
     workflow = create_group_wf()
     # workflow.write_graph(graph2use='colored', dotfilename='./graph_colored.dot')
-    workflow.run(plugin='MultiProc', plugin_args={'n_procs': 8})
-    # workflow.run()
+    # workflow.run(plugin='MultiProc', plugin_args={'n_procs': 2})
+    # workflow.run(plugin='SLURM')
+    workflow.run()

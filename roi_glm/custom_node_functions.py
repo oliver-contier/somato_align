@@ -85,3 +85,8 @@ def split_zfstats_runs(zfstats_list):
     zfstat_run1 = zfstats_list[0]
     zfstat_run2 = [zfstats_list[1]]  # operand files have to be a list
     return zfstat_run1, zfstat_run2
+
+
+def pick_first_mask(mask_files):
+    first_mask = mask_files[0]
+    return first_mask
