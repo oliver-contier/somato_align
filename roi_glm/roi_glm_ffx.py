@@ -19,8 +19,9 @@ def grab_subject_ids(ds_dir='/data/BnB_USER/oliver/somato/scratch/dataset',
 
 
 def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh, hp_vols, lp_vols, remove_hemi,
-                          film_thresh, film_model_autocorr, use_derivs, tr, tcon_subtractive, cond_ids, dsdir,
-                          meta_wf_workdir):
+                          film_thresh, film_model_autocorr, use_derivs, tr, tcon_subtractive, cluster_threshold,
+                          cluster_thresh_frac, cluster_p, dilate_clusters_voxel, cond_ids, dsdir, meta_wf_workdir):
+    # todo: new mapnode inputs: cluster_threshold, cluster_p
     """
     Make a workflow including preprocessing, first level, and second level GLM analysis for a given subject.
     This pipeline includes:
@@ -29,17 +30,19 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
     - removing the irrelevant hemisphere
     - temporal band pass filter
     - 1st level GLM
-    - 2nd level GLM
     - averaging f-contrasts from 1st level GLM
+    - clustering run-wise f-tests, dilating clusters, and returning binary roi mask
     """
 
     from nipype.algorithms.modelgen import SpecifyModel
-    from nipype.interfaces.fsl import BET, SUSAN
+    from nipype.interfaces.fsl import BET, SUSAN, ImageMaths
+    from nipype.interfaces.fsl.model import SmoothEstimate, Cluster
     from nipype.interfaces.fsl.maths import TemporalFilter, MathsCommand
     from nipype.interfaces.utility import Function
     from nipype.pipeline.engine import Workflow, Node, MapNode
-    from nipype.workflows.fmri.fsl import create_modelfit_workflow, create_fixed_effects_flow
+    from nipype.workflows.fmri.fsl import create_modelfit_workflow
     from nipype.interfaces.fsl.maths import MultiImageMaths
+    from nipype.interfaces.utility import IdentityInterface
     import sys
     from os.path import join as pjoin
     import os
@@ -80,14 +83,18 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
                   iterfield=['in_file'], name='bpf')
 
     # cut away hemisphere node
-    cut_hemi = MapNode(MathsCommand(), iterfield=['in_file'], name='cut_hemi')
     if remove_hemi == 'r':
         roi_args = '-roi 96 -1 0 -1 0 -1 0 -1'
     elif remove_hemi == 'l':
         roi_args = '-roi 0 96 0 -1 0 -1 0 -1'
     else:
         raise IOError('did not recognite value of remove_hemi %s' % remove_hemi)
-    cut_hemi.inputs.args = roi_args
+
+    cut_hemi_func = MapNode(MathsCommand(), iterfield=['in_file'], name='cut_hemi_func')
+    cut_hemi_func.inputs.args = roi_args
+
+    cut_hemi_mask = MapNode(MathsCommand(), iterfield=['in_file'], name='cut_hemi_mask')
+    cut_hemi_mask.inputs.args = roi_args
 
     # Make Design and Contrasts for that subject
     # subject_info ist a list of two "Bunches", each for one run, containing conditions, onsets, durations
@@ -120,56 +127,78 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
                                 function=custom_node_functions.sort_copes),
                        name='cope_sorter')
 
-    # Second-level workflow.
-    # Problem: Doesn't propagate F-Contrasts from first level ...
-    fixedfx = create_fixed_effects_flow()
-    fixedfx.get_node('l2model').inputs.num_copes = 2  # TODO: don't hardcode
-
-    # In addition to 2nd level glm, just average zfstats from both runs
+    # average zfstats from both runs
     split_zfstats = Node(Function(function=custom_node_functions.split_zfstats_runs,
                                   input_names=['zfstats_list'],
                                   output_names=['zfstat_run1', 'zfstat_run2']),
                          name='split_zfstats')
-
     average_zfstats = Node(MultiImageMaths(op_string='-add %s -div 2'), name='mean_images')
+
+    # estimate smoothness of 1st lvl zf-files
+    smoothest = MapNode(SmoothEstimate(), name='smoothest', iterfield=['mask_file', 'zstat_file'])
+
+    cluster = MapNode(Cluster(), name='cluster',
+                      iterfield=['in_file', 'volume', 'dlh'])
+    cluster.inputs.threshold = cluster_threshold
+    cluster.inputs.pthreshold = cluster_p
+    cluster.inputs.fractional = cluster_thresh_frac
+    cluster.inputs.no_table = True
+    cluster.inputs.out_threshold_file = True
+    cluster.inputs.out_pval_file = True
+    cluster.inputs.out_localmax_vol_file = True
+    cluster.inputs.out_max_file = True
+    cluster.inputs.out_size_file = True
+
+    # dilate clusters
+    dilate = MapNode(MathsCommand(args='-kernel sphere %i -dilD' % dilate_clusters_voxel),
+                     iterfield=['in_file'], name='dilate')
+
+    # binarize the result to a mask
+    binarize_roi = MapNode(ImageMaths(op_string='-nan -thr 0.001 -bin'),
+                           iterfield=['in_file'], name='binarize_roi')
 
     # connect preprocessing
     sub_wf.connect(grab_boldfiles, 'boldfiles', bet, 'in_file')
     sub_wf.connect(bet, 'out_file', susan, 'in_file')
     sub_wf.connect(susan, 'smoothed_file', bpf, 'in_file')
-    sub_wf.connect(bpf, 'out_file', cut_hemi, 'in_file')
+    sub_wf.connect(bpf, 'out_file', cut_hemi_func, 'in_file')
+    sub_wf.connect(bet, 'mask_file', cut_hemi_mask, 'in_file')
     # connect to 1st level model
-    sub_wf.connect(cut_hemi, 'out_file', modelspec, 'functional_runs')
+    sub_wf.connect(cut_hemi_func, 'out_file', modelspec, 'functional_runs')
     sub_wf.connect(designgen, 'subject_info', modelspec, 'subject_info')
     sub_wf.connect(modelspec, 'session_info', flatten_session_infos, 'nested_list')
     sub_wf.connect(flatten_session_infos, 'flat_list', modelfit, 'inputspec.session_info')
     sub_wf.connect(designgen, 'contrasts', modelfit, 'inputspec.contrasts')
-    sub_wf.connect(cut_hemi, 'out_file', modelfit, 'inputspec.functional_data')
+    sub_wf.connect(cut_hemi_func, 'out_file', modelfit, 'inputspec.functional_data')
+    # connect to cluster thresholding
+    sub_wf.connect(cut_hemi_mask, 'out_file', smoothest, 'mask_file')
+    sub_wf.connect(modelfit.get_node('modelestimate'), 'zfstats', smoothest, 'zstat_file')
+    sub_wf.connect(modelfit.get_node('modelestimate'), 'zfstats', cluster, 'in_file')
+    sub_wf.connect(smoothest, 'dlh', cluster, 'dlh')
+    sub_wf.connect(smoothest, 'volume', cluster, 'volume')
+    sub_wf.connect(cluster, 'threshold_file', dilate, 'in_file')
+    sub_wf.connect(dilate, 'out_file', binarize_roi, 'in_file')
     # connect to averaging f-contrasts
     sub_wf.connect(modelfit.get_node('modelestimate'), 'zfstats', split_zfstats, 'zfstats_list')
     sub_wf.connect(split_zfstats, 'zfstat_run1', average_zfstats, 'in_file')
     sub_wf.connect(split_zfstats, 'zfstat_run2', average_zfstats, 'operand_files')
-
-    # connect l1 to l2
-    sub_wf.connect(designgen, 'contrasts', cope_sorter, 'contrasts')
-    sub_wf.connect(modelfit, 'outputspec.copes', cope_sorter, 'copes')
-    sub_wf.connect(modelfit, 'outputspec.varcopes', cope_sorter, 'varcopes')
-    sub_wf.connect(cope_sorter, 'copes', fixedfx, 'inputspec.copes')
-    sub_wf.connect(cope_sorter, 'varcopes', fixedfx, 'inputspec.varcopes')
-    sub_wf.connect(modelfit, 'outputspec.dof_file', fixedfx, 'inputspec.dof_files')
-    sub_wf.connect(cope_sorter, 'n_runs', fixedfx.get_node('l2model'), 'num_copes')
-    sub_wf.connect(bet, 'mask_file', pick_mask, 'mask_files')
-    sub_wf.connect(pick_mask, 'first_mask', fixedfx.get_node('flameo'), 'mask_file')
+    # redirect to outputspec
+    # TODO: redirekt outputspec to datasink in meta-wf
+    outputspec = Node(IdentityInterface(
+        fields=['threshold_file', 'index_file', 'pval_file', 'localmax_txt_file']), name='outputspec')
+    sub_wf.connect(cluster, 'threshold_file', outputspec, 'threshold_file')
+    sub_wf.connect(cluster, 'index_file', outputspec, 'index_file')
+    sub_wf.connect(cluster, 'pval_file', outputspec, 'pval_file')
+    sub_wf.connect(cluster, 'localmax_txt_file', outputspec, 'localmax_txt_file')
 
     sub_wf.write_graph(graph2use='colored', dotfilename='./sub_graph_colored.dot')
-    # sub_wf.run(plugin='MultiProc', plugin_args={'n_procs': 2})
-    # sub_wf.run(plugin='SLURM')
-    sub_wf.run()
+    sub_wf.run(plugin='MultiProc', plugin_args={'n_procs': 6})
+    # sub_wf.run()
     return sub_wf
 
 
 def create_group_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/workdirs/',
-                    wf_datasink_dir='/data/BnB_USER/oliver/somato/scratch/roi_glm/results/hemi_onesample_run-1',
+                    wf_datasink_dir='/data/BnB_USER/oliver/somato/scratch/roi_glm/results/datasink',
                     dsdir='/data/BnB_USER/oliver/somato/scratch/dataset',
                     test_subs=False,
                     cond_ids=('D1_D5', 'D5_D1'),
@@ -182,8 +211,12 @@ def create_group_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/wor
                     remove_hemi='r',
                     film_thresh=.001,
                     film_model_autocorr=True,
-                    use_derivs=True,
-                    tcon_subtractive=False):
+                    use_derivs=False,
+                    tcon_subtractive=False,
+                    cluster_threshold=3,
+                    cluster_thresh_frac=True,
+                    cluster_p=.001,
+                    dilate_clusters_voxel=2):
     """
     Create meta-workflow, which executes a MapNode iterating over each subject-specific analysis pipeline.
 
@@ -216,37 +249,53 @@ def create_group_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/wor
     subj_grabber.inputs.testsubs = test_subs
 
     # map node performing subject-specific analysis pipelinde
-    sub_ffx = MapNode(
+    sub_wf = MapNode(
         Function(function=create_subject_ffx_wf,
                  inputs=['sub_id', 'bet_fracthr', 'spatial_fwhm', 'susan_brightthresh', 'hp_vols', 'lp_vols',
                          'remove_hemi', 'film_thresh', 'film_model_autocorr', 'use_derivs', 'tr', 'tcon_subtractive',
-                         'cond_ids', 'dsdir', 'meta_wf_workdir'],
+                         'cluster_threshold', 'cluster_thresh_frac', 'cluster_p', 'dilate_clusters_voxel', 'cond_ids',
+                         'dsdir', 'meta_wf_workdir'],
                  outputs=['sub_wf']),
         iterfield=['sub_id'],
         name='subject_ffx_mapnode')
-    sub_ffx.inputs.bet_fracthr = bet_fracthr
-    sub_ffx.inputs.spatial_fwhm = spatial_fwhm
-    sub_ffx.inputs.susan_brightthresh = susan_brightthresh
-    sub_ffx.inputs.hp_vols = hp_vols
-    sub_ffx.inputs.lp_vols = lp_vols
-    sub_ffx.inputs.remove_hemi = remove_hemi
-    sub_ffx.inputs.film_thresh = film_thresh
-    sub_ffx.inputs.film_model_autocorr = film_model_autocorr
-    sub_ffx.inputs.use_derivs = use_derivs
-    sub_ffx.inputs.tr = tr
-    sub_ffx.inputs.tcon_subtractive = tcon_subtractive
-    sub_ffx.inputs.cond_ids = cond_ids
-    sub_ffx.inputs.dsdir = dsdir
-    sub_ffx.inputs.meta_wf_workdir = wf_workdir
+    sub_wf.inputs.bet_fracthr = bet_fracthr
+    sub_wf.inputs.spatial_fwhm = spatial_fwhm
+    sub_wf.inputs.susan_brightthresh = susan_brightthresh
+    sub_wf.inputs.hp_vols = hp_vols
+    sub_wf.inputs.lp_vols = lp_vols
+    sub_wf.inputs.remove_hemi = remove_hemi
+    sub_wf.inputs.film_thresh = film_thresh
+    sub_wf.inputs.film_model_autocorr = film_model_autocorr
+    sub_wf.inputs.use_derivs = use_derivs
+    sub_wf.inputs.tr = tr
+    sub_wf.inputs.tcon_subtractive = tcon_subtractive
+    sub_wf.inputs.cond_ids = cond_ids
+    sub_wf.inputs.dsdir = dsdir
+    sub_wf.inputs.meta_wf_workdir = wf_workdir
+    sub_wf.inputs.cluster_threshold = cluster_threshold
+    sub_wf.inputs.cluster_p = cluster_p
+    sub_wf.inputs.cluster_thresh_frac = cluster_thresh_frac
+    sub_wf.inputs.dilate_clusters_voxel = dilate_clusters_voxel
 
-    wf.connect(subj_grabber, 'subject_ids', sub_ffx, 'sub_id')
+    wf.add_nodes([sub_wf])
+    wf.connect(subj_grabber, 'subject_ids', sub_wf, 'sub_id')
+
+    # TODO: datasink
+    # datasink = Node(interface=DataSink(), name="datasink")
+    # datasink.inputs.base_directory = wf_datasink_dir
+    # wf.connect(sub_wf, 'outputspec.threshold_file', datasink, 'threshold_file')
+    """
+    sub_wf.connect(cluster, 'threshold_file', outputspec, 'threshold_file')
+    sub_wf.connect(cluster, 'index_file', outputspec, 'index_file')
+    sub_wf.connect(cluster, 'pval_file', outputspec, 'pval_file')
+    sub_wf.connect(cluster, 'localmax_txt_file', outputspec, 'localmax_txt_file')
+    """
 
     return wf
 
 
 if __name__ == '__main__':
     workflow = create_group_wf()
-    # workflow.write_graph(graph2use='colored', dotfilename='./graph_colored.dot')
-    # workflow.run(plugin='MultiProc', plugin_args={'n_procs': 2})
-    # workflow.run(plugin='SLURM')
-    workflow.run()
+    workflow.write_graph(graph2use='colored', dotfilename='./graph_colored.dot')
+    workflow.run(plugin='MultiProc', plugin_args={'n_procs': 8})
+    # workflow.run()
