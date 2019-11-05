@@ -190,10 +190,13 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
     sub_wf.connect(cluster, 'index_file', outputspec, 'index_file')
     sub_wf.connect(cluster, 'pval_file', outputspec, 'pval_file')
     sub_wf.connect(cluster, 'localmax_txt_file', outputspec, 'localmax_txt_file')
+    sub_wf.connect(binarize_roi, 'out_file', outputspec, 'roi')
 
+    # run subject-lvl workflow
     sub_wf.write_graph(graph2use='colored', dotfilename='./sub_graph_colored.dot')
-    sub_wf.run(plugin='MultiProc', plugin_args={'n_procs': 6})
-    # sub_wf.run()
+    # sub_wf.run(plugin='MultiProc', plugin_args={'n_procs': 6})
+    sub_wf.run()
+
     return sub_wf
 
 
@@ -228,6 +231,7 @@ def create_group_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/wor
     import os
     from nipype.interfaces.utility import Function
     from nipype.pipeline.engine import Workflow, Node, MapNode
+    from nipype.interfaces.io import DataSink
 
     # is data dir correct
     assert os.path.exists(dsdir)
@@ -277,19 +281,13 @@ def create_group_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/wor
     sub_wf.inputs.cluster_thresh_frac = cluster_thresh_frac
     sub_wf.inputs.dilate_clusters_voxel = dilate_clusters_voxel
 
-    wf.add_nodes([sub_wf])
+    # give subject ID to subject-level workflow
     wf.connect(subj_grabber, 'subject_ids', sub_wf, 'sub_id')
 
     # TODO: datasink
-    # datasink = Node(interface=DataSink(), name="datasink")
+    # datasink = MapNode(interface=DataSink(), name="datasink", iterfield=['roi'])
     # datasink.inputs.base_directory = wf_datasink_dir
-    # wf.connect(sub_wf, 'outputspec.threshold_file', datasink, 'threshold_file')
-    """
-    sub_wf.connect(cluster, 'threshold_file', outputspec, 'threshold_file')
-    sub_wf.connect(cluster, 'index_file', outputspec, 'index_file')
-    sub_wf.connect(cluster, 'pval_file', outputspec, 'pval_file')
-    sub_wf.connect(cluster, 'localmax_txt_file', outputspec, 'localmax_txt_file')
-    """
+    # wf.connect(sub_wf, 'outputspec.roi', datasink, 'roi')
 
     return wf
 
@@ -297,5 +295,5 @@ def create_group_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/wor
 if __name__ == '__main__':
     workflow = create_group_wf()
     workflow.write_graph(graph2use='colored', dotfilename='./graph_colored.dot')
-    workflow.run(plugin='MultiProc', plugin_args={'n_procs': 8})
-    # workflow.run()
+    # workflow.run(plugin='MultiProc', plugin_args={'n_procs': 8})
+    workflow.run()
