@@ -34,9 +34,13 @@ def grab_subject_ids(ds_dir='/data/BnB_USER/oliver/somato/scratch/dataset',
 
 
 def datagrabber(roi_glm_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/workdirs/',
-                sub_ids=grab_subject_ids()):
+                testsubs=False):
+    """
     # grab file names for
     # filtered bold data and roi masks from roi_glm output
+    """
+
+    sub_ids = grab_subject_ids(testsubs=testsubs)
     run1_data, run2_data, run1_masks, run2_masks = [], [], [], []
     for sub_id in sub_ids:
         sub_wf_dir = pjoin(roi_glm_workdir, 'subject_ffx_wfs', 'subject_%s_ffx_workdir' % sub_id,
@@ -71,7 +75,7 @@ def load_data(run1_data, run2_data, run1_masks, run2_masks,
 def train_srm(training_data,
               use_robust_srm=True,
               n_comps=10,
-              n_iters=40,
+              n_iters=4,
               printruntime=True):
     """
     Fit srm on training data
@@ -107,7 +111,8 @@ def save_srm_as_pickle(srm_instance,
 
 
 if __name__ == '__main__':
-    run1_data, run2_data, run1_masks, run2_masks = datagrabber()
+    run1_data, run2_data, run1_masks, run2_masks = datagrabber(testsubs=3)
     run_arrs = load_data(run1_data, run2_data, run1_masks, run2_masks)
     srm = train_srm(training_data=run_arrs)
-    outpickle = save_srm_as_pickle(srm_instance=srm)
+    import pdb;pdb.set_trace()
+    # outpickle = save_srm_as_pickle(srm_instance=srm)
