@@ -12,12 +12,14 @@ python3 -m pip install --no-use-pep517 brainiak
 import os
 import pickle
 import time
+import numpy as np
 from os.path import join as pjoin
 
 from brainiak.funcalign.rsrm import RSRM
 from brainiak.funcalign.srm import SRM
 from nilearn.image import load_img
 from nilearn.masking import apply_mask
+from scipy import stats
 
 
 def grab_subject_ids(ds_dir='/data/BnB_USER/oliver/somato/scratch/dataset',
@@ -55,7 +57,10 @@ def datagrabber(roi_glm_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/wo
 
 
 def load_data(run1_data, run2_data, run1_masks, run2_masks,
-              whichrun=1):
+              whichrun=1,
+              force_mask_run1=False,
+              zscore=True,
+              nan2num=True):
     """
     Load the masked data for a given run in array form
     to suit brainiak input.
@@ -66,9 +71,21 @@ def load_data(run1_data, run2_data, run1_masks, run2_masks,
         run_data, run_masks = run2_data, run2_masks
     else:
         raise IOError('did not recognize argument %s for whichrun' % str(whichrun))
+    if force_mask_run1:
+        run_masks = run1_masks
     print('loading data')
-    run_arrs = [apply_mask(load_img(data), mask_img=mask).T
-                for data, mask in zip(run_data, run_masks)]
+    if zscore:
+        run_arrs = [
+            stats.zscore(  # load image, apply mask, z-score
+                apply_mask(load_img(data), mask_img=mask).T,
+                axis=1, ddof=1)
+            for data, mask in zip(run_data, run_masks)
+        ]
+    else:
+        run_arrs = [apply_mask(load_img(data), mask_img=mask).T
+                    for data, mask in zip(run_data, run_masks)]
+    if nan2num:
+        run_arrs = [np.nan_to_num(bold_array) for bold_array in run_arrs]
     return run_arrs
 
 
@@ -114,5 +131,7 @@ if __name__ == '__main__':
     run1_data, run2_data, run1_masks, run2_masks = datagrabber(testsubs=3)
     run_arrs = load_data(run1_data, run2_data, run1_masks, run2_masks)
     srm = train_srm(training_data=run_arrs)
-    import pdb;pdb.set_trace()
+    import pdb;
+
+    pdb.set_trace()
     # outpickle = save_srm_as_pickle(srm_instance=srm)
