@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
 
-"""
-Project subjects bold data onto shared response space in a cross-validated way.
-For every subject, an srm is trained on the remaining subjects.
-this srm is trained on the data from run one, and the data from the test subject's other run is than projected
-onto this template.
-
-Data is saved in numpy's npy.
-"""
 import runpy
 import time
 from os.path import join as pjoin
@@ -27,6 +19,11 @@ def project_data_crossval(run1_arrs,
                           k=10,
                           niter=20,
                           outdir='/data/BnB_USER/oliver/somato/scratch/crossval_projection'):
+    """
+    Project subjects bold data onto shared response space in a cross-validated way. For every subject, an srm is
+    trained on the remaining subjects. this srm is trained on the data from run one, and the data from the test
+    subject's other run is than projected onto this template. Data is saved in numpy's npy.
+    """
     # iterate over runs used for training / testing
     for trainrun_idx in range(2):
         # select run used for training and test
