@@ -8,3 +8,4 @@
 *.nii.gz
 ._README.md
 *__pycache__
+srm/animations/
