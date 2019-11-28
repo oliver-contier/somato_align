@@ -9,12 +9,13 @@
 """
 
 import runpy
-
-import numpy as np
 import time
 from os.path import join as pjoin
+
+import numpy as np
 from brainiak.funcalign.rsrm import RSRM
 from scipy import signal, stats
+from sklearn.svm import SVC
 
 # import io functions from my other srm script
 file_globals = runpy.run_path('srm_roi.py')
@@ -31,7 +32,7 @@ def get_digit_indices(n_cycles=20,
     Each array has shape (n_digits, n_volumes).
     Use these to select samples in our classification task
     """
-    # TODO: I'm VERY UNSURE if these indices are correct ...
+    # TODO: These indices are only correct if I understand Esther's stimulus timing correctly ...
 
     vols_per_digit_upsampled = int(vols_per_digit * 100)
     digits_run1 = []
@@ -42,21 +43,33 @@ def get_digit_indices(n_cycles=20,
         post_padded = np.append(finger_signal, [0] * vols_per_digit_upsampled * (5 - didx))
         first_cycle = np.insert(post_padded, obj=0, values=[0] * vols_per_digit_upsampled * (didx - 1))
         all_cycles = np.tile(first_cycle, n_cycles)  # repeat to get all cycles
-        # resample to volume space (downsampling leads to fuzzy edges)
-        digit_signal = signal.resample(all_cycles, vols)
-        # make a boolean array
-        digit_bool = digit_signal > .5
+        # resample to volume space (i.e. take every 100th element)
+        # and turn into boolean vector
+        digit_bool = all_cycles[::100] > 0.01
         digits_run1.append(digit_bool)
     digits_run1 = np.array(digits_run1)
     digits_run2 = np.flip(digits_run1, axis=0)
     return digits_run1, digits_run2
 
 
-def compute_corrmat_digits(test_data,
-                           test_digits_arr,
-                           train_digits_arr,
-                           trained_srm,
-                           average_axis=1):
+def digit_indices_to_labels(digits_run1, digits_run2):
+    """
+    Turn the boolean arrays of digit indices
+    into 1d arrays with values 1-6
+    for use with SVC.
+    """
+    labels_run1, labels_run2 = np.zeros(shape=(256)), np.zeros(shape=(256))
+    for finger_i in range(1, 6):
+        labels_run1[digits_run1[finger_i - 1]] = finger_i
+        labels_run2[digits_run2[finger_i - 1]] = finger_i
+    return labels_run1, labels_run2
+
+
+def deprecated_compute_corrmat_digits(test_data,
+                                      test_digits_arr,
+                                      train_digits_arr,
+                                      trained_srm,
+                                      average_axis=1):
     """
     Compute a correlation matrix between the digit segments in a test subject's data from the test run
     and the respective trained shared responses.
@@ -77,9 +90,9 @@ def compute_corrmat_digits(test_data,
     return corr_mtx
 
 
-def corrmat_accuracies(corr_mat):
+def deprecated_corrmat_accuracies(corr_mat):
     """
-    Take correlation matrix calculated with compute_corrmat_digits and
+    Take correlation matrix calculated with deprecated_compute_corrmat_digits and
     return list of accuracies with each element representing one digit.
     """
     accuracies = []
@@ -94,10 +107,12 @@ def corrmat_accuracies(corr_mat):
 
 def run_crossval_classification_given_k(run1_arrs,
                                         run2_arrs,
-                                        digits_run1,
-                                        digits_run2,
+                                        labels_run1,
+                                        labels_run2,
                                         k=3,
                                         niter=20,
+                                        svc_kernel='rbf',
+                                        svc_gamma='auto',
                                         outdir='/data/BnB_USER/oliver/somato/scratch/digit_classification'):
     """
     # TODO: In order to transform data from run 2 to run 1, the ROI masks from both runs have to have the same
@@ -105,14 +120,15 @@ def run_crossval_classification_given_k(run1_arrs,
     """
 
     # prepare empty results array
-    acc_results = np.zeros(shape=(2, len(run1_arrs), 5))  # shape (nruns, nsubs, ndigits)
+    # acc_results = np.zeros(shape=(2, len(run1_arrs), 5))  # shape (nruns, nsubs, ndigits)
+    acc_results = np.zeros(shape=(2, len(run1_arrs)))
 
     for trainrun_idx in range(2):  # iterate over runs
         # select run used for training and test and according digit indices
         training_arrs = (run1_arrs, run2_arrs)[trainrun_idx]
         test_arrs = (run1_arrs, run2_arrs)[abs(trainrun_idx - 1)]
-        train_digits = (digits_run1, digits_run2)[trainrun_idx]
-        test_digits = (digits_run1, digits_run2)[abs(trainrun_idx - 1)]
+        train_digits = (labels_run1, labels_run2)[trainrun_idx]
+        test_digits = (labels_run1, labels_run2)[abs(trainrun_idx - 1)]
 
         # iterate over testsubjects
         for testsub_idx in range(len(training_arrs)):
@@ -135,11 +151,19 @@ def run_crossval_classification_given_k(run1_arrs,
             testsub_proj = projected_data[testsub_idx]  # select projected data from test subject
 
             # compute correlation matrix
-            corr_mtx = compute_corrmat_digits(test_data=testsub_proj,  trained_srm=srm,
-                                              test_digits_arr=test_digits, train_digits_arr=train_digits)
+            # corr_mtx = deprecated_compute_corrmat_digits(test_data=testsub_proj, trained_srm=srm,
+            #                                             test_digits_arr=test_digits, train_digits_arr=train_digits)
             # compute accuracies
-            accuracies = corrmat_accuracies(corr_mtx)
-            acc_results[trainrun_idx, testsub_idx] = accuracies  # append result to our results arrays
+            # accuracies = deprecated_corrmat_accuracies(corr_mtx)
+
+            # set up support vector classifier
+            clf = SVC(kernel=svc_kernel, gamma=svc_gamma)
+            # train classifier
+            clf.fit(srm.r_.T, train_digits)
+            # score on test data
+            score = clf.score(testsub_proj.T, test_digits)
+            print('score: ', score)
+            acc_results[trainrun_idx, testsub_idx] = score  # append result to our results arrays
             elapsed = time.time() - start
             print('this round took: ', elapsed)
 
@@ -152,8 +176,8 @@ def run_crossval_classification_given_k(run1_arrs,
     return None
 
 
-def test_different_ks(ks=(3, 5, 10, 20, 50, 100),
-                      srm_iter=20):
+def test_different_ks(ks=(3, 5, 10, 20, 50, 100, 200),
+                      srm_iter=30):
     """
     Run cross-validated classification to over different numbers of shared responses (k)
     and save the resulting accuracies.
@@ -165,11 +189,13 @@ def test_different_ks(ks=(3, 5, 10, 20, 50, 100),
     print('loading run 2')
     run2_arrs = load_data(run1_data, run2_data, run1_masks, run2_masks, whichrun=2, force_mask_run1=True)
     digits_run1, digits_run2 = get_digit_indices()
+    labels_run1, labels_run2 = digit_indices_to_labels(digits_run1, digits_run2)
 
     for k in ks:
         print('starting k :', k)
         run_crossval_classification_given_k(run1_arrs=run1_arrs, run2_arrs=run2_arrs, k=k,
-                                            digits_run1=digits_run1, digits_run2=digits_run2, niter=srm_iter)
+                                            labels_run1=labels_run1, labels_run2=labels_run2,
+                                            niter=srm_iter)
 
     return None
 
