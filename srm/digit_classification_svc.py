@@ -120,7 +120,7 @@ def run_crossval_classification_given_k(run1_arrs,
     """
 
     # prepare empty results array
-    # acc_results = np.zeros(shape=(2, len(run1_arrs), 5))  # shape (nruns, nsubs, ndigits)
+    # acc_results = np.zeros(shape=(2, len(run1_arrays), 5))  # shape (nruns, nsubs, ndigits)
     acc_results = np.zeros(shape=(2, len(run1_arrs)))
 
     for trainrun_idx in range(2):  # iterate over runs
@@ -179,7 +179,7 @@ def run_crossval_classification_given_k(run1_arrs,
 def test_different_ks(ks=(3, 5, 10, 20, 50, 100, 200),
                       srm_iter=30):
     """
-    Run cross-validated classification to over different numbers of shared responses (k)
+    Run cross-validated classification to over different numbers of shared responses (nfeatures)
     and save the resulting accuracies.
     """
     # load data
@@ -192,7 +192,7 @@ def test_different_ks(ks=(3, 5, 10, 20, 50, 100, 200),
     labels_run1, labels_run2 = digit_indices_to_labels(digits_run1, digits_run2)
 
     for k in ks:
-        print('starting k :', k)
+        print('starting nfeatures :', k)
         run_crossval_classification_given_k(run1_arrs=run1_arrs, run2_arrs=run2_arrs, k=k,
                                             labels_run1=labels_run1, labels_run2=labels_run2,
                                             niter=srm_iter)
