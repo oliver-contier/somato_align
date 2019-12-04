@@ -107,15 +107,13 @@ def project_data_crossval(run1_arrs,
     return projected_data, trained_srms
 
 
-def knn_within_run(projected_data,
-                   nneighs=5,
-                   zscore_over_all=True):
+def knn_cross_sub_and_run(projected_data,
+                          nneighs=5,
+                          zscore_over_all=True):
     """
-    Train a KNN classifier on all but one subjects data for a given run, and test on the left-out subject for that
-    same run. (within-run cross-subject predictions).
-
+    Train a KNN classifier on all but one subjects data for a given run, and test on the left-out subject for the other
+    run. (cross-run cross-subject predictions).
     Returns array with accuracies of shape (nsubs, nruns).
-
     (remember, input array projected_data has shape (nsubs, nruns, nfeatures, nvols))
     """
     # get digit labels
@@ -128,7 +126,6 @@ def knn_within_run(projected_data,
     nsubs, nruns, nfeatures, nvols = projected_data.shape
     accuracies = np.zeros((nsubs, nruns))
     # iterate over subjects and runs
-    nsubs = projected_data.shape[0]
     for sub_i in range(nsubs):
         for testrun_i in range(2):
             # select training and test data and labels
@@ -147,31 +144,108 @@ def knn_within_run(projected_data,
     return accuracies
 
 
+def knn_within_run(projected_data,
+                   nneighs=5,
+                   zscore_over_all=True):
+    """
+    Train KNN on all but one subject and test at left-out subject's data from the same run.
+    """
+    # get digit labels
+    digits_run1, digits_run2 = get_digit_indices()
+    labels_run1, labels_run2 = digit_indices_to_labels(digits_run1, digits_run2)
+    # global z-scoring
+    if zscore_over_all:
+        projected_data = zscore(projected_data, axis=3)
+    # prepare accuracy array
+    nsubs, nruns, nfeatures, nvols = projected_data.shape
+    accuracies = np.zeros((nsubs, nruns))
+    for testsub_i in range(nsubs):
+        for within_run_i in range(2):
+            # select training and test data and labels
+            test_data = projected_data[testsub_i, within_run_i, :, :]
+            submask = np.ones(nsubs, dtype=bool)
+            submask[testsub_i] = False
+            train_data = projected_data[submask, within_run_i, :, :]
+            train_data = train_data.reshape(nfeatures, nvols * (nsubs-1))
+            test_labels = [labels_run1, labels_run2][within_run_i]
+            train_labels = np.tile(test_labels, (nsubs-1))
+            # train classifier and score
+            neigh = KNeighborsClassifier(n_neighbors=nneighs)
+            neigh.fit(train_data.T, train_labels)
+            accuracies[testsub_i, within_run_i] = neigh.score(test_data.T, test_labels)
+    return accuracies
+
+
+def knn_within_sub(projected_data,
+                   nneigh=5,
+                   zscore_over_all=True):
+    """
+    Classify digits within subject, across runs.
+    """
+    digits_run1, digits_run2 = get_digit_indices()
+    labels_run1, labels_run2 = digit_indices_to_labels(digits_run1, digits_run2)
+    # global z-scoring
+    if zscore_over_all:
+        projected_data = zscore(projected_data, axis=3)
+    # prepare accuracy array
+    nsubs, nruns, nfeatures, nvols = projected_data.shape
+    results = np.zeros((nsubs, nruns))
+    for sub_i in range(nsubs):
+        for trainrun_i in range(nruns):
+            testrun_i = abs(trainrun_i - 1)
+            train_data = projected_data[sub_i, trainrun_i, :, :]
+            test_data = projected_data[sub_i, testrun_i, :, :]
+            train_labels = [labels_run1, labels_run2][trainrun_i]
+            test_labels = [labels_run1, labels_run2][testrun_i]
+            neigh = KNeighborsClassifier(n_neighbors=nneigh)
+            neigh.fit(train_data.T, train_labels)
+            results[sub_i, trainrun_i] = neigh.score(test_data.T, test_labels)
+    return results
+
+
 def classify_over_nfeatures_nneighbors(run1_arrs, run2_arrs,
                                        nfeat_range=(5, 10, 20, 50, 100),
                                        nneigh_range=tuple(range(3, 101, 2)),
-                                       outdir='/data/BnB_USER/oliver/somato/scratch/digit_classification_knn'):
+                                       proj_outdir='/data/BnB_USER/oliver/somato/scratch/crossval_projection',
+                                       knn_outdir='/data/BnB_USER/oliver/somato/scratch/digit_classification_knn'):
     """
     Iterate over different values for the number of features allowed in the SRM
     and number of neighbors the KNN classifier considers.
-    Save the whole shebang in npz files in given outdir.
+    Save the whole shebang in npz files in given knn_outdir.
     """
-    if not os.path.exists(outdir):
-        os.makedirs(outdir)
+    if not os.path.exists(knn_outdir):
+        os.makedirs(knn_outdir)
     for nfeat in nfeat_range:
-        print('starting projection with %i features' % nfeat)
-        projected_data, trained_srms = project_data_crossval(run1_arrs, run2_arrs, nfeatures=nfeat)
+        proj_outpath = pjoin(proj_outdir, 'proj_data_nfeats-%i.npy' % nfeat)
+        if os.path.exists(proj_outpath):
+            with open(proj_outpath, 'rb') as f:
+                projected_data = np.load(f)
+        else:
+            print('starting projection with %i features' % nfeat)
+            projected_data, trained_srms = project_data_crossval(run1_arrs, run2_arrs, nfeatures=nfeat,
+                                                                 outdir=proj_outdir)
         for nneigh in nneigh_range:
             print('and classification with %i neighbors' % nneigh)
-            knn_results = knn_within_run(projected_data, nneighs=nneigh)
-            out_fname = pjoin(outdir, 'nfeat-%i_nneigh-%i.npz' % (nfeat, nneigh))
+            # cross-subject cross-run classification
+            crossall_results = knn_cross_sub_and_run(projected_data, nneighs=nneigh)
+            out_fname = pjoin(knn_outdir, 'nfeat-%i_nneigh-%i.npz' % (nfeat, nneigh))
             with open(out_fname, 'wb') as f:
-                np.save(f, knn_results)
+                np.save(f, crossall_results)
+            # cross-subject within-run classification
+            withinrun_results = knn_within_run(projected_data, nneighs=nneigh)
+            withinrun_outfname = pjoin(knn_outdir, 'withinrun_nfeat-%i_nneigh-%i.npz' % (nfeat, nneigh))
+            with open(withinrun_outfname, 'wb') as f:
+                np.save(f, withinrun_results)
+            withinsub_results = knn_within_sub(projected_data, nneigh=nneigh)
+            withinsub_outfname = pjoin(knn_outdir, 'withinsub_nfeat-%i_nneigh-%i.npz'% (nfeat, nneigh))
+            with open(withinsub_outfname, 'wb') as f:
+                np.save(f, withinsub_results)
             print('finished nfeats %i nneighs %i' % (nfeat, nneigh))
     return None
 
 
 if __name__ == '__main__':
+
     # load input data
     run1_data, run2_data, run1_masks, run2_masks = datagrabber()
     print('loading run 1 data')
