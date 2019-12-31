@@ -15,11 +15,12 @@ def get_bold_fnames(ds_dir='/data/project/somato/raw/data/DatenKuehn/',
     returns boldfiles_dict with conditions as keys and filenames per subject as values
     """
     sub_ids = [os.path.basename(subdir)
-               for subdir in glob.glob(ds_dir + '/*')]
+               for subdir in glob.glob(ds_dir + '/*')
+               if '.txt' not in subdir]  # skip readme.txt
     boldfiles_dict = {}
     for cond in conds:
         boldfiles_dict[cond] = [pjoin(ds_dir, sub_id, cond, 'data.nii')
-                           for sub_id in sub_ids]
+                                for sub_id in sub_ids]
     return boldfiles_dict, sub_ids
 
 
