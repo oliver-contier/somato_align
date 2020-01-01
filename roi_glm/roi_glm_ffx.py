@@ -5,7 +5,7 @@
 """
 
 
-def grab_subject_ids(ds_dir='/data/BnB_USER/oliver/somato/scratch/dataset',
+def grab_subject_ids(ds_dir='/data/project/somato/scratch/dataset',
                      testsubs=False):
     """
     Get list of all subject IDs.
@@ -46,7 +46,7 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
     import sys
     from os.path import join as pjoin
     import os
-    sys.path.insert(0, "/data/BnB_USER/oliver/somato/raw/code/roi_glm/custom_node_functions.py")
+    sys.path.insert(0, "/data/project/somato/raw/code/roi_glm/custom_node_functions.py")
     # TODO: don't hardcode this
     import custom_node_functions
 
@@ -58,13 +58,21 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
         os.makedirs(subwf_wd)
     sub_wf.base_dir = subwf_wd
 
-    # Grab both runs of one subject
+    # Grab bold files for all four runs of one subject.
+    # in the order [d1_d5, d5_d1, blocked_design1, blocked_design2]
     grab_boldfiles = Node(Function(function=custom_node_functions.grab_boldfiles_subject,
                                    input_names=['sub_id', 'cond_ids', 'ds_dir'], output_names=['boldfiles']),
                           name='grab_boldfiles')
     grab_boldfiles.inputs.sub_id = sub_id
     grab_boldfiles.inputs.cond_ids = cond_ids
     grab_boldfiles.inputs.ds_dir = dsdir
+
+    getonsets = Node(Function(function=custom_node_functions.grab_blocked_design_onsets_subject,
+                              input_names=['sub_id', 'prepped_ds_dir'],
+                              output_names=['blocked_design_onsets_dicts']),
+                     name='getonsets')
+    getonsets.inputs.sub_id = sub_id
+    getonsets.inputs.prepped_ds_dir = dsdir
 
     # pass bold files through preprocessing pipeline
     bet = MapNode(BET(frac=bet_fracthr, functional=True, mask=True),
@@ -98,7 +106,7 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
 
     # Make Design and Contrasts for that subject
     # subject_info ist a list of two "Bunches", each for one run, containing conditions, onsets, durations
-    designgen = Node(Function(input_names=['subtractive_contrast'],
+    designgen = Node(Function(input_names=['subtractive_contrast', 'blocked_design_onsets_dicts'],
                               output_names=['subject_info', 'contrasts'],
                               function=custom_node_functions.make_bunch_and_contrasts),
                      name='designgen')
@@ -165,6 +173,7 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
     sub_wf.connect(bet, 'mask_file', cut_hemi_mask, 'in_file')
     # connect to 1st level model
     sub_wf.connect(cut_hemi_func, 'out_file', modelspec, 'functional_runs')
+    sub_wf.connect(getonsets, 'blocked_design_onsets_dicts', designgen, 'blocked_design_onsets_dicts')
     sub_wf.connect(designgen, 'subject_info', modelspec, 'subject_info')
     sub_wf.connect(modelspec, 'session_info', flatten_session_infos, 'nested_list')
     sub_wf.connect(flatten_session_infos, 'flat_list', modelfit, 'inputspec.session_info')
@@ -193,18 +202,22 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
     sub_wf.connect(binarize_roi, 'out_file', outputspec, 'roi')
 
     # run subject-lvl workflow
-    sub_wf.write_graph(graph2use='colored', dotfilename='./sub_graph_colored.dot')
+    sub_wf.write_graph(graph2use='colored', dotfilename='./subwf_graph.dot')
     # sub_wf.run(plugin='MultiProc', plugin_args={'n_procs': 6})
+    # sub_wf.run(plugin='CondorDAGMan')
     sub_wf.run()
 
     return sub_wf
 
 
-def create_group_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/workdirs/',
-                    wf_datasink_dir='/data/BnB_USER/oliver/somato/scratch/roi_glm/results/datasink',
-                    dsdir='/data/BnB_USER/oliver/somato/scratch/dataset',
+def create_group_wf(wf_workdir='/data/project/somato/scratch/roi_glm/workdirs/',
+                    wf_datasink_dir='/data/project/somato/scratch/roi_glm/results/datasink',
+                    dsdir='/data/project/somato/scratch/dataset',
                     test_subs=False,
-                    cond_ids=('D1_D5', 'D5_D1'),
+                    cond_ids=('D1_D5', 'D5_D1', 'blocked_design1', 'blocked_design2'),
+                    # TODO: use cond_ids for mask estimation,
+                    #  but also preprocess data from random stimulation.
+                    #  Or just run like this and ignore / remove the GLM results from random stim data
                     tr=2.,
                     bet_fracthr=.2,
                     spatial_fwhm=2,
@@ -231,7 +244,6 @@ def create_group_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/wor
     import os
     from nipype.interfaces.utility import Function
     from nipype.pipeline.engine import Workflow, Node, MapNode
-    from nipype.interfaces.io import DataSink
 
     # is data dir correct
     assert os.path.exists(dsdir)
@@ -294,6 +306,7 @@ def create_group_wf(wf_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/wor
 
 if __name__ == '__main__':
     workflow = create_group_wf()
-    workflow.write_graph(graph2use='colored', dotfilename='./graph_colored.dot')
+    workflow.write_graph(graph2use='colored', dotfilename='./groupwf_graph.dot')
     # workflow.run(plugin='MultiProc', plugin_args={'n_procs': 8})
+    # workflow.run(plugin='CondorDAGMan')
     workflow.run()

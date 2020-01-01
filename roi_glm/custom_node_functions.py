@@ -10,7 +10,31 @@ def grab_boldfiles_subject(sub_id, cond_ids, ds_dir):
     return boldfiles
 
 
-def make_bunch_and_contrasts(n_cycles=20,
+def grab_blocked_design_onsets_subject(sub_id,
+                                       prepped_ds_dir):
+    """
+    For the given subject, generate a dict with keys blocked_design1 and blocked_design2
+    and nested lists as values representing the onsets of the five digits.
+
+    note: durations is always 5.12, so no need to load that.
+    """
+    import csv
+    from os.path import join as pjoin
+    blocked_design_onsets_dicts = {}
+    cond_ids = ('blocked_design1', 'blocked_design2')
+    for condid in cond_ids:
+        blocked_design_onsets_dicts[condid] = []
+        for dig_int in range(1, 6):
+            dig_abspath = pjoin(prepped_ds_dir, sub_id, condid, 'D%i.ons' % dig_int)
+            with open(dig_abspath, 'r') as f:
+                csv_reader = csv.reader(f, delimiter='\n')
+                dig_onsets = [row[0] for row in csv_reader]
+                blocked_design_onsets_dicts[condid].append(dig_onsets)
+    return blocked_design_onsets_dicts
+
+
+def make_bunch_and_contrasts(blocked_design_onsets_dicts,
+                             n_cycles=20,
                              dur_per_digit=5.12,
                              subtractive_contrast=False):
     """
@@ -21,35 +45,40 @@ def make_bunch_and_contrasts(n_cycles=20,
     contrast (because it would be a linear combination of the others).
     Non-subtractive contrast (i.e. one-sample t-test) weights regressor of interest with 1 and all others with 0.
     """
-    # TODO: design and contrasts don't work for condition 2 atm!!!
 
     from nipype.interfaces.base import Bunch
     cycle_dur = dur_per_digit * 5
 
-    # onsets are the same for both ocnditions, just the order of regressors is flipped
-    onsets = [[0 + (digit_idx * dur_per_digit) + (cycle_idx * cycle_dur)
+    # in periodic stimulation runs: onsets are the same for both conditions, just the order of regressors is flipped
+    periodic_onsets = [[0 + (digit_idx * dur_per_digit) + (cycle_idx * cycle_dur)
                for cycle_idx in range(n_cycles)]
               for digit_idx in range(5)]
     durations = [[dur_per_digit] * n_cycles for _ in range(5)]
-    run1_conditions = ['D_%i' % i for i in range(1, 6)]
-    run2_conditions = ['D_%i' % i for i in range(5, 0, -1)]
+    d1_d5_conditions = ['D_%i' % i for i in range(1, 6)]
+    d5_d1_conditions = ['D_%i' % i for i in range(5, 0, -1)]
 
-    subject_info = [Bunch(conditions=run1_conditions, onsets=onsets, durations=durations),
-                    Bunch(conditions=run2_conditions, onsets=onsets, durations=durations)]
+    # blocked_design conditions and onsets
+    blocked1_onsets = blocked_design_onsets_dicts['blocked_design1']
+    blocked2_onsets = blocked_design_onsets_dicts['blocked_design2']
+
+    subject_info = [Bunch(conditions=d1_d5_conditions, onsets=periodic_onsets, durations=durations),
+                    Bunch(conditions=d5_d1_conditions, onsets=periodic_onsets, durations=durations),
+                    Bunch(conditions=d1_d5_conditions, onsets=blocked1_onsets, durations=durations),
+                    Bunch(conditions=d1_d5_conditions, onsets=blocked2_onsets, durations=durations)]
     # t-cotrasts
     t_contrasts = []
-    for cond in run1_conditions:
+    for cond_name in d1_d5_conditions:
         if subtractive_contrast:
-            if run1_conditions.index(cond) == len(cond) - 1:
+            if d1_d5_conditions.index(cond_name) == len(cond_name) - 1:
                 continue
             else:
                 contrast_vector = [-1, -1, -1, -1]
-                contrast_vector.insert(run1_conditions.index(cond), 4)
-                t_contrasts.append(('tcon_%s' % cond, 'T', run1_conditions, contrast_vector))
+                contrast_vector.insert(d1_d5_conditions.index(cond_name), 4)
+                t_contrasts.append(('tcon_%s' % cond_name, 'T', d1_d5_conditions, contrast_vector))
         else:
             contrast_vector = [0, 0, 0, 0]
-            contrast_vector.insert(run1_conditions.index(cond), 1)
-            t_contrasts.append(('tcon_%s' % cond, 'T', run1_conditions, contrast_vector))
+            contrast_vector.insert(d1_d5_conditions.index(cond_name), 1)
+            t_contrasts.append(('tcon_%s' % cond_name, 'T', d1_d5_conditions, contrast_vector))
     # f-contrast over all t-contrasts
     f_contrast = [('All_Digits', 'F', t_contrasts)]
     contrasts = t_contrasts + f_contrast
