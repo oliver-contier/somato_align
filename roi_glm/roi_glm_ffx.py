@@ -20,7 +20,7 @@ def grab_subject_ids(ds_dir='/data/project/somato/scratch/dataset',
 
 def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh, hp_vols, lp_vols, remove_hemi,
                           film_thresh, film_model_autocorr, use_derivs, tr, tcon_subtractive, cluster_threshold,
-                          cluster_thresh_frac, cluster_p, dilate_clusters_voxel, cond_ids, dsdir, meta_wf_workdir):
+                          cluster_thresh_frac, cluster_p, dilate_clusters_voxel, cond_ids, dsdir, work_basedir):
     # todo: new mapnode inputs: cluster_threshold, cluster_p
     """
     Make a workflow including preprocessing, first level, and second level GLM analysis for a given subject.
@@ -53,7 +53,7 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
     # set up sub-workflow
     sub_wf = Workflow(name='subject_%s_wf' % sub_id)
     # set up sub-working-directory
-    subwf_wd = pjoin(meta_wf_workdir, 'subject_ffx_wfs', 'subject_%s_ffx_workdir' % sub_id)
+    subwf_wd = pjoin(work_basedir, 'subject_ffx_wfs', 'subject_%s_ffx_workdir' % sub_id)
     if not os.path.exists(subwf_wd):
         os.makedirs(subwf_wd)
     sub_wf.base_dir = subwf_wd
@@ -210,103 +210,36 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
     return sub_wf
 
 
-def create_group_wf(wf_workdir='/data/project/somato/scratch/roi_glm/workdirs/',
-                    wf_datasink_dir='/data/project/somato/scratch/roi_glm/results/datasink',
-                    dsdir='/data/project/somato/scratch/dataset',
-                    test_subs=False,
-                    cond_ids=('D1_D5', 'D5_D1', 'blocked_design1', 'blocked_design2'),
-                    # TODO: use cond_ids for mask estimation,
-                    #  but also preprocess data from random stimulation.
-                    #  Or just run like this and ignore / remove the GLM results from random stim data
-                    tr=2.,
-                    bet_fracthr=.2,
-                    spatial_fwhm=2,
-                    susan_brightthresh=1000,
-                    hp_vols=30.,
-                    lp_vols=2.,
-                    remove_hemi='r',
-                    film_thresh=.001,
-                    film_model_autocorr=True,
-                    use_derivs=False,
-                    tcon_subtractive=False,
-                    cluster_threshold=3,
-                    cluster_thresh_frac=True,
-                    cluster_p=.001,
-                    dilate_clusters_voxel=2):
-    """
-    Create meta-workflow, which executes a MapNode iterating over each subject-specific analysis pipeline.
-
-    ### Notes ###
-    filmgls threshold: nipype default is 1000. However, since this is applied on already heavily filtered data here,
-    everything above 0.01 cuts away lots of grey matter voxels.
-    """
-
-    import os
-    from nipype.interfaces.utility import Function
-    from nipype.pipeline.engine import Workflow, Node, MapNode
-
-    # is data dir correct
-    assert os.path.exists(dsdir)
-    # make work and res dir if necessary
-    for target_dir in [wf_workdir, wf_datasink_dir]:
-        if not os.path.exists(target_dir):
-            os.makedirs(target_dir)
-
-    # initiate meta-workflow
-    wf = Workflow(name='somato_roi_glm_wf')
-    wf.base_dir = wf_workdir
-
-    # node grabbing list of subject names
-    subj_grabber = Node(Function(function=grab_subject_ids,
-                                 input_names=['ds_dir', 'testsubs'],
-                                 output_names=['subject_ids']),
-                        name='subj_grabber')
-    subj_grabber.inputs.ds_dir = dsdir
-    subj_grabber.inputs.testsubs = test_subs
-
-    # map node performing subject-specific analysis pipelinde
-    sub_wf = MapNode(
-        Function(function=create_subject_ffx_wf,
-                 inputs=['sub_id', 'bet_fracthr', 'spatial_fwhm', 'susan_brightthresh', 'hp_vols', 'lp_vols',
-                         'remove_hemi', 'film_thresh', 'film_model_autocorr', 'use_derivs', 'tr', 'tcon_subtractive',
-                         'cluster_threshold', 'cluster_thresh_frac', 'cluster_p', 'dilate_clusters_voxel', 'cond_ids',
-                         'dsdir', 'meta_wf_workdir'],
-                 outputs=['sub_wf']),
-        iterfield=['sub_id'],
-        name='subject_ffx_mapnode')
-    sub_wf.inputs.bet_fracthr = bet_fracthr
-    sub_wf.inputs.spatial_fwhm = spatial_fwhm
-    sub_wf.inputs.susan_brightthresh = susan_brightthresh
-    sub_wf.inputs.hp_vols = hp_vols
-    sub_wf.inputs.lp_vols = lp_vols
-    sub_wf.inputs.remove_hemi = remove_hemi
-    sub_wf.inputs.film_thresh = film_thresh
-    sub_wf.inputs.film_model_autocorr = film_model_autocorr
-    sub_wf.inputs.use_derivs = use_derivs
-    sub_wf.inputs.tr = tr
-    sub_wf.inputs.tcon_subtractive = tcon_subtractive
-    sub_wf.inputs.cond_ids = cond_ids
-    sub_wf.inputs.dsdir = dsdir
-    sub_wf.inputs.meta_wf_workdir = wf_workdir
-    sub_wf.inputs.cluster_threshold = cluster_threshold
-    sub_wf.inputs.cluster_p = cluster_p
-    sub_wf.inputs.cluster_thresh_frac = cluster_thresh_frac
-    sub_wf.inputs.dilate_clusters_voxel = dilate_clusters_voxel
-
-    # give subject ID to subject-level workflow
-    wf.connect(subj_grabber, 'subject_ids', sub_wf, 'sub_id')
-
-    # TODO: datasink
-    # datasink = MapNode(interface=DataSink(), name="datasink", iterfield=['roi'])
-    # datasink.inputs.base_directory = wf_datasink_dir
-    # wf.connect(sub_wf, 'outputspec.roi', datasink, 'roi')
-
-    return wf
-
-
 if __name__ == '__main__':
-    workflow = create_group_wf()
-    workflow.write_graph(graph2use='colored', dotfilename='./groupwf_graph.dot')
-    # workflow.run(plugin='MultiProc', plugin_args={'n_procs': 8})
-    # workflow.run(plugin='CondorDAGMan')
-    workflow.run()
+    import sys
+
+    # catch subject id passed in through runscript
+    subidx = int(sys.argv[1])
+    subids = grab_subject_ids(ds_dir='/data/project/somato/scratch/dataset', testsubs=False)
+    subid = subids[subidx]
+
+    # generate workflow
+    subwf = create_subject_ffx_wf(sub_id=subid,
+                                  bet_fracthr=.2,
+                                  spatial_fwhm=2,
+                                  susan_brightthresh=1000,
+                                  hp_vols=30.,
+                                  lp_vols=2.,
+                                  remove_hemi='r',
+                                  film_thresh=.001,
+                                  film_model_autocorr=True,
+                                  use_derivs=False,
+                                  tr=2.,
+                                  tcon_subtractive=False,
+                                  cluster_threshold=3.,
+                                  cluster_thresh_frac=True,
+                                  cluster_p=.001,
+                                  dilate_clusters_voxel=2,
+                                  cond_ids=('D1_D5', 'D5_D1', 'blocked_design1', 'blocked_design2'),
+                                  dsdir='/data/project/somato/scratch/dataset',
+                                  work_basedir='/data/project/somato/scratch/roi_glm/work_basedir')
+
+    # run
+    subwf.write_graph(graph2use='colored', dotfilename='./groupwf_graph.dot')
+    # subwf.run()
+    subwf.run(plugin='MultiProc', plugin_args={'n_procs': 4})

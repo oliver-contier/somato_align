@@ -1,0 +1,67 @@
+Universe    = vanilla
+Executable  = run_roi_glm.sh
+Error       = run_roi_glm.error
+output      = run_roi_glm.out
+log         = run_roi_glm.log
+request_cpus = 4
+
+Arguments   = 0
+Queue
+Arguments   = 1
+Queue
+Arguments   = 2
+Queue
+Arguments   = 3
+Queue
+Arguments   = 4
+Queue
+Arguments   = 5
+Queue
+Arguments   = 6
+Queue
+Arguments   = 7
+Queue
+Arguments   = 8
+Queue
+Arguments   = 9
+Queue
+Arguments   = 10
+Queue
+Arguments   = 11
+Queue
+Arguments   = 12
+Queue
+Arguments   = 13
+Queue
+Arguments   = 14
+Queue
+Arguments   = 15
+Queue
+Arguments   = 16
+Queue
+Arguments   = 17
+Queue
+Arguments   = 18
+Queue
+Arguments   = 19
+Queue
+Arguments   = 20
+Queue
+Arguments   = 21
+Queue
+Arguments   = 22
+Queue
+Arguments   = 23
+Queue
+Arguments   = 24
+Queue
+Arguments   = 25
+Queue
+Arguments   = 26
+Queue
+Arguments   = 27
+Queue
+Arguments   = 28
+Queue
+Arguments   = 29
+Queue

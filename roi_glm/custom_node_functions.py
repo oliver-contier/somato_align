@@ -28,7 +28,7 @@ def grab_blocked_design_onsets_subject(sub_id,
             dig_abspath = pjoin(prepped_ds_dir, sub_id, condid, 'D%i.ons' % dig_int)
             with open(dig_abspath, 'r') as f:
                 csv_reader = csv.reader(f, delimiter='\n')
-                dig_onsets = [row[0] for row in csv_reader]
+                dig_onsets = [float(row[0]) for row in csv_reader]
                 blocked_design_onsets_dicts[condid].append(dig_onsets)
     return blocked_design_onsets_dicts
 

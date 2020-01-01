@@ -1,3 +1,6 @@
+*.error
+*.log
+*.out
 *try_*.ipynb
 *.mp4
 *.dot
