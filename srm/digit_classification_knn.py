@@ -46,7 +46,7 @@ def digit_indices_to_labels(digits_run1, digits_run2):
     """
     Turn the boolean arrays of digit indices
     into 1d arrays with values 1-6
-    for use with SVC.
+    for use with sklearn classifiers.
     """
     labels_run1, labels_run2 = np.zeros(shape=256), np.zeros(shape=256)
     for finger_i in range(1, 6):

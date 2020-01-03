@@ -12,9 +12,9 @@ python3 -m pip install --no-use-pep517 brainiak
 import os
 import pickle
 import time
-import numpy as np
 from os.path import join as pjoin
 
+import numpy as np
 from brainiak.funcalign.rsrm import RSRM
 from brainiak.funcalign.srm import SRM
 from nilearn.image import load_img
@@ -35,25 +35,45 @@ def grab_subject_ids(ds_dir='/data/BnB_USER/oliver/somato/scratch/dataset',
     return sub_ids
 
 
-def datagrabber(roi_glm_workdir='/data/BnB_USER/oliver/somato/scratch/roi_glm/workdirs/',
+def datagrabber(roi_glm_workdir='/data/project/somato/scratch/roi_glm/workdirs/',
+                prepped_dsdir='/data/project/somato/scratch/dataset',
                 testsubs=False):
     """
     # grab file names for
     # filtered bold data and roi masks from roi_glm output
     """
-
-    sub_ids = grab_subject_ids(testsubs=testsubs)
-    run1_data, run2_data, run1_masks, run2_masks = [], [], [], []
+    sub_ids = grab_subject_ids(testsubs=testsubs, ds_dir=prepped_dsdir)
+    run1_data, run2_data, run3_data, run4_data, = [], [], [], []
+    run1_masks, run2_masks, run3_masks, run4_masks = [], [], [], []
     for sub_id in sub_ids:
         sub_wf_dir = pjoin(roi_glm_workdir, 'subject_ffx_wfs', 'subject_%s_ffx_workdir' % sub_id,
                            'subject_%s_wf' % sub_id)
-        run1_data.append(pjoin(sub_wf_dir, 'bpf', 'mapflow', '_bpf0', 'data_brain_smooth_filt.nii.gz'))
-        run2_data.append(pjoin(sub_wf_dir, 'bpf', 'mapflow', '_bpf1', 'data_brain_smooth_filt.nii.gz'))
-        run1_masks.append(pjoin(sub_wf_dir, 'binarize_roi', 'mapflow',
-                                '_binarize_roi0', 'zfstat1_threshold_maths_maths.nii.gz'))
-        run2_masks.append(pjoin(sub_wf_dir, 'binarize_roi', 'mapflow',
-                                '_binarize_roi1', 'zfstat1_threshold_maths_maths.nii.gz'))
-    return run1_data, run2_data, run1_masks, run2_masks
+        # file names for filtered bold files
+        for run_idx, rundata in enumerate([run1_data, run2_data, run3_data, run4_data]):
+            fname = pjoin(sub_wf_dir, 'bpf', 'mapflow', '_bpf%i' % run_idx, 'data_brain_smooth_filt.nii.gz')
+            if not os.path.exists(fname):
+                raise IOError('filtered nifti does not exist : ', fname)
+            rundata.append(fname)
+        # file names for masks
+        for run_idx, runmasks in enumerate([run1_masks, run2_masks, run3_masks, run4_masks]):
+            fname = pjoin(sub_wf_dir, 'binarize_roi', 'mapflow',
+                          '_binarize_roi%i' % run_idx, 'zfstat1_threshold_maths_maths.nii.gz')
+            if not os.path.exists(fname):
+                raise IOError('mask file does not exist : ', fname)
+            runmasks.append(fname)
+        # run1_data.append(pjoin(sub_wf_dir, 'bpf', 'mapflow', '_bpf0', 'data_brain_smooth_filt.nii.gz'))
+        # run2_data.append(pjoin(sub_wf_dir, 'bpf', 'mapflow', '_bpf1', 'data_brain_smooth_filt.nii.gz'))
+        # run3_data.append(pjoin(sub_wf_dir, 'bpf', 'mapflow', '_bpf2', 'data_brain_smooth_filt.nii.gz'))
+        # run4_data.append(pjoin(sub_wf_dir, 'bpf', 'mapflow', '_bpf3', 'data_brain_smooth_filt.nii.gz'))
+        # run1_masks.append(pjoin(sub_wf_dir, 'binarize_roi', 'mapflow',
+        #                         '_binarize_roi0', 'zfstat1_threshold_maths_maths.nii.gz'))
+        # run2_masks.append(pjoin(sub_wf_dir, 'binarize_roi', 'mapflow',
+        #                         '_binarize_roi1', 'zfstat1_threshold_maths_maths.nii.gz'))
+        # run3_masks.append(pjoin(sub_wf_dir, 'binarize_roi', 'mapflow',
+        #                         '_binarize_roi2', 'zfstat1_threshold_maths_maths.nii.gz'))
+        # run4_masks.append(pjoin(sub_wf_dir, 'binarize_roi', 'mapflow',
+        #                         '_binarize_roi3', 'zfstat1_threshold_maths_maths.nii.gz'))
+    return run1_data, run2_data, run3_data, run4_data, run1_masks, run2_masks, run3_masks, run4_masks
 
 
 def load_data(run1_data, run2_data, run1_masks, run2_masks,
@@ -131,7 +151,4 @@ if __name__ == '__main__':
     run1_data, run2_data, run1_masks, run2_masks = datagrabber(testsubs=3)
     run_arrs = load_data(run1_data, run2_data, run1_masks, run2_masks)
     srm = train_srm(training_data=run_arrs)
-    import pdb;
-
-    pdb.set_trace()
     # outpickle = save_srm_as_pickle(srm_instance=srm)
