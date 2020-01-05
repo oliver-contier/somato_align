@@ -202,10 +202,10 @@ def create_subject_ffx_wf(sub_id, bet_fracthr, spatial_fwhm, susan_brightthresh,
     sub_wf.connect(binarize_roi, 'out_file', outputspec, 'roi')
 
     # run subject-lvl workflow
-    sub_wf.write_graph(graph2use='colored', dotfilename='./subwf_graph.dot')
+    # sub_wf.write_graph(graph2use='colored', dotfilename='./subwf_graph.dot')
     # sub_wf.run(plugin='MultiProc', plugin_args={'n_procs': 6})
     # sub_wf.run(plugin='CondorDAGMan')
-    sub_wf.run()
+    # sub_wf.run()
 
     return sub_wf
 

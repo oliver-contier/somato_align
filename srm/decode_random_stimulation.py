@@ -16,32 +16,35 @@ from sklearn.neighbors import KNeighborsClassifier
 file_globals = runpy.run_path('srm_roi.py')
 file_globals2 = runpy.run_path('digit_classification_knn.py')
 datagrabber = file_globals['datagrabber']
-load_data = file_globals['load_data']
+# load_data = file_globals['load_data']
 grab_subject_ids = file_globals['grab_subject_ids']
 # functions to get digit indices in periodic runs
 get_digit_indices, digit_indices_to_labels = file_globals2['get_digit_indices'], \
                                              file_globals2['digit_indices_to_labels']
 
 
-def load_and_append_periodic_runs_single_subject(run1_datafile, run2_datafile,
+def load_and_append_periodic_runs_single_subject(run1_boldfile, run2_boldfile,
                                                  run1_maskfile, run2_maskfile,
-                                                 zscorewithinrun=True):
+                                                 zscorewithinrun=True,
+                                                 connected_clusters=False):
     """
     For a given subject, load the data from the first two runs (periodic stimulation),
     mask with a union of the run masks
     and z score if desired.
     """
     # get union mask
-    unionmask = intersect_masks([run1_maskfile, run2_maskfile], threshold=0, connected=False)
+    print('trying to intersect masks : ', run1_maskfile, ' and ', run2_maskfile)
+    unionmask = intersect_masks([run1_maskfile, run2_maskfile], threshold=0, connected=connected_clusters)
     # load data, apply mask
-    run1_arr = apply_mask(load_img(run1_datafile), mask_img=unionmask).T
-    run2_arr = apply_mask(load_img(run2_datafile), mask_img=unionmask).T
+    run1_arr = apply_mask(load_img(run1_boldfile), mask_img=unionmask).T
+    run2_arr = apply_mask(load_img(run2_boldfile), mask_img=unionmask).T
     # zscore within run if desired
     if zscorewithinrun:
         for runimg in [run1_arr, run2_arr]:
             runimg = zscore(np.nan_to_num(runimg), axis=1)
     # concatenate runs
     sub_arr = np.concatenate((run1_arr, run2_arr), axis=1)
+    print('finished loading masks: ', run1_maskfile, ' and ', run2_maskfile)
     return sub_arr, unionmask
 
 
@@ -61,6 +64,7 @@ def load_and_append_periodic_data(run1_data, run2_data,
                                                                           zscorewithinrun=zscore_withinrun)
         periodic_data.append(sub_arr)
         union_masks.append(unionmask)
+        print('finished loading subject with index : ', sub_idx)
     return periodic_data, union_masks
 
 
@@ -153,12 +157,13 @@ def make_periodic_labels(stimdur=5.12,
 
 def load_data_and_labels(testsubs_=False,
                          dsdir='/data/project/somato/scratch/dataset',
-                         roiglm_workdir='/data/project/somato/scratch/roi_glm/work_basedir/'):
+                         roiglm_workdir='/data/project/somato/scratch/roi_glm/work_basedir/',
+                         excludesubs=()):
     """
     Grab data and labels, fit srm and project data.
     Write as function as prestep for different potential classifiers.
     """
-    sub_ids = grab_subject_ids(ds_dir=dsdir, testsubs=testsubs_)
+    sub_ids = grab_subject_ids(ds_dir=dsdir, testsubs=testsubs_, exclude_subs=excludesubs)
 
     print('get labels')
     # get digit labels for periodic data and randomized data
@@ -170,11 +175,11 @@ def load_data_and_labels(testsubs_=False,
     # get relevant file_paths
     print('datagrabber')
     run1_data, run2_data, \
-    run3_data, run4_data, \
-    run1_masks, run2_masks, \
-    run3_masks, run4_masks = datagrabber(roi_glm_workdir=roiglm_workdir,
-                                         prepped_dsdir=dsdir,
-                                         testsubs=testsubs_)  # TODO: remove testsubs later
+        run3_data, run4_data, \
+        run1_masks, run2_masks, \
+        run3_masks, run4_masks = datagrabber(roi_glm_workdir=roiglm_workdir,
+                                             prepped_dsdir=dsdir,
+                                             testsubs=testsubs_)
     print('load_and_append_periodic')
     # load concatenated periodic data
     periodic_data, union_masks = load_and_append_periodic_data(run1_data, run2_data,
@@ -193,11 +198,11 @@ def fit_and_project(periodic_data,
                     nfeatures=5):
     # fit srm and project randomized data to shared space
     srm, random1_projected, random2_projected, \
-    periodic_data_projected_list = fit_srm_and_project_data(periodic_data,
-                                                            random1_data,
-                                                            random2_data,
-                                                            n_responses=nfeatures,
-                                                            n_iter=n_iters_srm)
+        periodic_data_projected_list = fit_srm_and_project_data(periodic_data,
+                                                                random1_data,
+                                                                random2_data,
+                                                                n_responses=nfeatures,
+                                                                n_iter=n_iters_srm)
 
     return srm, random1_projected, random2_projected, periodic_data_projected_list
 
@@ -229,14 +234,16 @@ def knn_randomdata_given_neighs(periodic_data_projected_list,
 
 def iterate_knn_over_nneighs_nfeaturs(nfeatures_range=(5, 8, 10, 15, 20, 50, 100),
                                       nneighs_range=(5, 8, 10, 15, 20, 50, 100),
-                                      outdir='/data/project/somato/scratch/decode_random_stimulation'):
-
+                                      outdir='/data/project/somato/scratch/decode_random_stimulation',
+                                      exclude_subs=()):
     # TODO: this is the top level function. also specify all kwargs for lower level functions here.
     # TODO: docstring
 
     # load data
     print('loading data')
-    periodic_data, random1_data, random2_data, periodic_labels_concat, random_labels = load_data_and_labels()
+    periodic_data, \
+        random1_data, random2_data, \
+        periodic_labels_concat, random_labels = load_data_and_labels(excludesubs=exclude_subs)
 
     # prepare empty results array of shape (nfeatures_range, nneighs_range, nsubs, nruns)
     results = np.zeros(shape=(len(nfeatures_range), len(nneighs_range), len(random1_data), 2))
@@ -245,8 +252,8 @@ def iterate_knn_over_nneighs_nfeaturs(nfeatures_range=(5, 8, 10, 15, 20, 50, 100
         # fit srm
         print('fitting srm with ', str(nfeatures_))
         srm, random1_projected, random2_projected, \
-        periodic_data_projected_list = fit_and_project(periodic_data,
-                                                       random1_data, random2_data, nfeatures=nfeatures_)
+            periodic_data_projected_list = fit_and_project(periodic_data,
+                                                           random1_data, random2_data, nfeatures=nfeatures_)
 
         for neighs_idx, nneighs_ in enumerate(nneighs_range):
             print('starting classification with ', str(nneighs_))
@@ -269,4 +276,4 @@ def iterate_knn_over_nneighs_nfeaturs(nfeatures_range=(5, 8, 10, 15, 20, 50, 100
 
 
 if __name__ == '__main__':
-    iterate_knn_over_nneighs_nfeaturs()
+    iterate_knn_over_nneighs_nfeaturs(exclude_subs=('fip66'))  # TODO check out what's wrong with fip66 data

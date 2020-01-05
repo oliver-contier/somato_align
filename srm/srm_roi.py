@@ -23,7 +23,8 @@ from scipy import stats
 
 
 def grab_subject_ids(ds_dir='/data/BnB_USER/oliver/somato/scratch/dataset',
-                     testsubs=False):
+                     testsubs=False,
+                     exclude_subs=()):
     """
     Get list of all subject IDs.
     """
@@ -32,17 +33,21 @@ def grab_subject_ids(ds_dir='/data/BnB_USER/oliver/somato/scratch/dataset',
     sub_ids = [os.path.basename(subdir) for subdir in glob.glob(ds_dir + '/*')]
     if testsubs:
         sub_ids = sub_ids[:testsubs]
+    if exclude_subs:
+        sub_ids = [subid for subid in sub_ids if subid not in exclude_subs]
+    print('subject ids :', sub_ids)
     return sub_ids
 
 
 def datagrabber(roi_glm_workdir='/data/project/somato/scratch/roi_glm/workdirs/',
                 prepped_dsdir='/data/project/somato/scratch/dataset',
-                testsubs=False):
+                testsubs=False,
+                excludesubs=()):
     """
     # grab file names for
     # filtered bold data and roi masks from roi_glm output
     """
-    sub_ids = grab_subject_ids(testsubs=testsubs, ds_dir=prepped_dsdir)
+    sub_ids = grab_subject_ids(testsubs=testsubs, ds_dir=prepped_dsdir, exclude_subs=excludesubs)
     run1_data, run2_data, run3_data, run4_data, = [], [], [], []
     run1_masks, run2_masks, run3_masks, run4_masks = [], [], [], []
     for sub_id in sub_ids:
