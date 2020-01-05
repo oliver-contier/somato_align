@@ -34,6 +34,8 @@ def grab_subject_ids(ds_dir='/data/BnB_USER/oliver/somato/scratch/dataset',
     if testsubs:
         sub_ids = sub_ids[:testsubs]
     if exclude_subs:
+        # for exclude_sub in exclude_subs:
+        #     sub_ids.remove(exclude_sub)
         sub_ids = [subid for subid in sub_ids if subid not in exclude_subs]
     print('subject ids :', sub_ids)
     return sub_ids
@@ -66,18 +68,7 @@ def datagrabber(roi_glm_workdir='/data/project/somato/scratch/roi_glm/workdirs/'
             if not os.path.exists(fname):
                 raise IOError('mask file does not exist : ', fname)
             runmasks.append(fname)
-        # run1_data.append(pjoin(sub_wf_dir, 'bpf', 'mapflow', '_bpf0', 'data_brain_smooth_filt.nii.gz'))
-        # run2_data.append(pjoin(sub_wf_dir, 'bpf', 'mapflow', '_bpf1', 'data_brain_smooth_filt.nii.gz'))
-        # run3_data.append(pjoin(sub_wf_dir, 'bpf', 'mapflow', '_bpf2', 'data_brain_smooth_filt.nii.gz'))
-        # run4_data.append(pjoin(sub_wf_dir, 'bpf', 'mapflow', '_bpf3', 'data_brain_smooth_filt.nii.gz'))
-        # run1_masks.append(pjoin(sub_wf_dir, 'binarize_roi', 'mapflow',
-        #                         '_binarize_roi0', 'zfstat1_threshold_maths_maths.nii.gz'))
-        # run2_masks.append(pjoin(sub_wf_dir, 'binarize_roi', 'mapflow',
-        #                         '_binarize_roi1', 'zfstat1_threshold_maths_maths.nii.gz'))
-        # run3_masks.append(pjoin(sub_wf_dir, 'binarize_roi', 'mapflow',
-        #                         '_binarize_roi2', 'zfstat1_threshold_maths_maths.nii.gz'))
-        # run4_masks.append(pjoin(sub_wf_dir, 'binarize_roi', 'mapflow',
-        #                         '_binarize_roi3', 'zfstat1_threshold_maths_maths.nii.gz'))
+
     return run1_data, run2_data, run3_data, run4_data, run1_masks, run2_masks, run3_masks, run4_masks
 
 
@@ -153,7 +144,8 @@ def save_srm_as_pickle(srm_instance,
 
 
 if __name__ == '__main__':
-    run1_data, run2_data, run1_masks, run2_masks = datagrabber(testsubs=3)
+    run1_data, run2_data, run3_data, run4_data, \
+        run1_masks, run2_masks, run3_masks, run4_masks = datagrabber(testsubs=3)
     run_arrs = load_data(run1_data, run2_data, run1_masks, run2_masks)
     srm = train_srm(training_data=run_arrs)
     # outpickle = save_srm_as_pickle(srm_instance=srm)

@@ -179,7 +179,7 @@ def load_data_and_labels(testsubs_=False,
         run1_masks, run2_masks, \
         run3_masks, run4_masks = datagrabber(roi_glm_workdir=roiglm_workdir,
                                              prepped_dsdir=dsdir,
-                                             testsubs=testsubs_)
+                                             testsubs=testsubs_, excludesubs=excludesubs)
     print('load_and_append_periodic')
     # load concatenated periodic data
     periodic_data, union_masks = load_and_append_periodic_data(run1_data, run2_data,
