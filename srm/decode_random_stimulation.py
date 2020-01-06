@@ -33,7 +33,7 @@ def load_and_append_periodic_runs_single_subject(run1_boldfile, run2_boldfile,
     and z score if desired.
     """
     # get union mask
-    print('trying to intersect masks : ', run1_maskfile, ' and ', run2_maskfile)
+    print('intersecting masks :', '\t', run1_maskfile, '\t', 'and', '\t',run2_maskfile)
     unionmask = intersect_masks([run1_maskfile, run2_maskfile], threshold=0, connected=connected_clusters)
     # load data, apply mask
     run1_arr = apply_mask(load_img(run1_boldfile), mask_img=unionmask).T
@@ -168,7 +168,6 @@ def load_data_and_labels(testsubs_=False,
     print('get labels')
     # get digit labels for periodic data and randomized data
     periodic_labels_2d, periodic_labels_concat = make_periodic_labels()
-    # TODO: I think periodic labels / onsets might be wrong.
     random_onsets = get_onsets_randomruns(sub_ids, prepped_ds_dir=dsdir)
     random_labels = randomruns_onsets_to_labels(random_onsets)
 
